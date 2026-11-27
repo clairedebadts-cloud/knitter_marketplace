@@ -50,3 +50,13 @@ Node.js 18 or later. Your real stash goes in `stash.local.json` (gitignored); wi
 - idealo trial tier: 500 calls a day, max 10 offers per product; Amazon, eBay and Otto offers are filtered out, so some cheaper listings have no shop offer.
 - Ravelry gives one metres range for all sizes; the agent plans for the top of the range.
 - Resale shares (70% full skeins, 50% partial) are starting assumptions, not market data.
+
+## Guardrails
+- **Never spends money**: the agent builds a basket with links; nothing is bought or checked out automatically.
+- **Human in the loop**: the stash and budget history only change after the knitter confirms ("Shall I mark this as bought?").
+- **Hard budget limits**: max price per skein and per project; anything over is flagged, never bought.
+- **Asks instead of guessing**: conflicting evidence ends in ASK_USER with the options laid out.
+- **Honest data**: missing idealo offers are shown as indicative prices with a warning, never invented.
+- **Quota limits**: one offers call per product, max 5 substitute searches per run (idealo trial: 500 calls/day).
+- **Least privilege** (`.claude/settings.json`): Claude Code may only run the buy/sell scripts and the read-only idealo tools; it cannot read `.env` or the personal stash, delete files, call other URLs or push to git. Ravelry access is read-only.
+- **No secrets or personal data in the repo**: `.env`, `stash.local.json` and `run/` are gitignored.
