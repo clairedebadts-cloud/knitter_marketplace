@@ -12,7 +12,7 @@ Knitters find the pattern first and the yarn second. The pattern names one yarn,
 **Buy** (`/basket <ravelry-url> <size>`)
 1. Reads the pattern from the Ravelry API: yarn weight, metres, needles, gauge, suggested yarns.
 2. Checks the stash first and only buys what is missing. One dye lot only counts toward the main body.
-3. Checks the budget: max price per skein and max project total, plus a long-term range once past projects show a consistent pattern.
+3. Checks the budget: max price per skein and max project total (demo defaults: €10 per skein, €150 per project, needles included), plus a long-term range once past projects show a consistent pattern.
 4. Searches idealo for the pattern yarn and ranks offers from cheapest to most expensive, shipping included.
 5. When the yarn is over budget or not buyable, looks for substitutes:
    - yarns Ravelry knitters used for this pattern,
