@@ -37,6 +37,7 @@ Return ONLY JSON:
       "yarn": "DROPS Merino Extra Fine",
       "action": "SUBSTITUTE",
       "choice": "string (shop + product, or stash lot)",
+      "substitute": "for SUBSTITUTE: exact held_together label, or the substitute / budget substitute yarn as in result.json; else null",
       "skeins": 3,
       "total_eur": 18.5,
       "reasons": ["short, checkable reasons citing the numbers"],

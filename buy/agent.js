@@ -189,17 +189,49 @@ function heldTogetherStep() {
     : 'No idealo searches needed for held-together strands. Next: node buy/agent.js finish');
 }
 
+// Which yarns a decision actually uses, with metres needed and skeins bought, taken from result.json.
+// decision.substitute names the chosen option: a held-together label, or a substitute / budget substitute yarn key.
+function usesFor(result, plan, dec) {
+  const line = result.lines.find((l) => l.yarn === dec.yarn) || (result.lines.length === 1 && !dec.yarn ? result.lines[0] : null);
+  if (!line) throw new Error(`Decision yarn ${JSON.stringify(dec.yarn)} is not a line in result.json (${result.lines.map((l) => l.yarn).join(', ')})`);
+  const fromLine = (l, spec) => ({ brand: spec.brand, name: spec.name, colour: spec.colour || null,
+    metres_per_skein: spec.metres_per_skein, skein_grams: spec.skein_grams,
+    metres_needed: l.needed_metres, skeins_bought: l.skeins_to_buy });
+  if (dec.action === 'SUBSTITUTE') {
+    const held = (result.held_together || []).find((h) => h.label === dec.substitute);
+    if (held) {
+      return held.lines.map((l) => fromLine(l, held.strands.find((st) => yarnKey(st) === l.yarn)));
+    }
+    const sub = [...(result.substitutes || []), ...(result.budget_substitutes || [])].find((x) => x.line.yarn === dec.substitute);
+    if (sub) return [fromLine(sub.line, sub.candidate)];
+    throw new Error(`SUBSTITUTE needs "substitute" set to a held_together label or substitute yarn in result.json (got ${JSON.stringify(dec.substitute)})`);
+  }
+  if (dec.action === 'USE_STASH' || dec.action === 'BUY_ORIGINAL' || dec.action === 'ASK_USER') {
+    const main = plan.pattern.yarns.find((y) => yarnKey(y) === line.yarn) || plan.pattern.yarns[0];
+    return [fromLine(line, { ...(dec.yarn_spec || {}), ...main })];
+  }
+  return [];
+}
+
 function confirm() {
   const result = read('result.json');
+  const plan = read('plan.json');
   const decision = read('decision.json');
-  const s = stash.load();
+  // The knitter said yes: an open ASK_USER is treated as buying the pattern yarn.
+  for (const d of decision.decisions) if (d.action === 'ASK_USER') console.log(`${d.yarn}: ASK_USER approved, treated as BUY_ORIGINAL.`);
+  const uses = decision.decisions.flatMap((d) => usesFor(result, plan, d));
+  const needlesBought = (result.needles || []).filter((n) => !n.owned && n.zing && n.zing.best_in_stock)
+    .map((n) => ({ type: n.type, mm: n.mm, brand: 'KnitPro Zing' }));
   const total = decision.basket_total_eur || 0;
-  const metres = result.lines.reduce((a, l) => a + l.needed_metres, 0);
+  const metres = uses.reduce((a, u) => a + (u.metres_needed || 0), 0);
+  const s = stash.load();
   s.budget.history = [...(s.budget.history || []), {
     project: result.pattern, total_eur: total, per_100m_eur: metres ? Math.round((total / metres) * 100 * 100) / 100 : 0,
   }];
-  stash.save(s);
-  const file = stash.applyProject(result, decision.decisions);
+  stash.applyUses(s, uses, needlesBought);
+  const file = stash.save(s);
+  for (const u of uses) console.log(`Used ${u.brand} ${u.name}: ${u.metres_needed} m${u.skeins_bought ? `, bought ${u.skeins_bought} skeins` : ' from stash'}`);
+  for (const n of needlesBought) console.log(`Added needle: KnitPro Zing ${n.mm} mm`);
   console.log(`Stash and budget history updated in ${path.basename(file)} (private, gitignored).`);
 }
 
