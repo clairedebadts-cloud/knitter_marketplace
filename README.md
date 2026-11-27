@@ -1,1 +1,1 @@
-# knitter_marketplace
+Knitter Marketplace turns a Ravelry pattern into an idealo basket, but only for what you're missing. It checks your stash first, respects your budget, and when the pattern yarn is too expensive it finds substitutes: other yarns of the same weight, or two strands held together, from your stash first. The sell side prices your leftover yarn against idealo's new price. Buying and selling share one stash.
