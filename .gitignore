@@ -12,3 +12,6 @@ stash.local.json
 node_modules/
 __pycache__/
 *.log
+
+# Outputs and API cache
+run/

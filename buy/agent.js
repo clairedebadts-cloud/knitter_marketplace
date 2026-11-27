@@ -80,7 +80,7 @@ function confirm() {
 (async () => {
   const [cmd, a, b] = process.argv.slice(2);
   try {
-    if (cmd === 'inspect') { const { raw, pattern } = await ravelry.fetchPattern(a); console.log(JSON.stringify({ raw_keys: Object.keys(raw), raw_packs: raw.packs, normalised: pattern }, null, 2)); }
+    if (cmd === 'inspect') { const { pattern } = await ravelry.fetchPattern(a); console.log(JSON.stringify(pattern, null, 2)); }
     else if (cmd === 'prepare') await prepare(a, b);
     else if (cmd === 'finish') finish();
     else if (cmd === 'confirm') confirm();
