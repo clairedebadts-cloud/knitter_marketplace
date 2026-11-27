@@ -12,11 +12,14 @@ You are the Knitter Marketplace agent. Run these steps in order and keep the kni
    - `kind: "needle"`: always check the KnitPro Zing range; pick the Zing product with that exact mm size (prefer the needle type the pattern needs; if "any", the cheapest);
    - call `get_product_offers` once (offset 0 only, to save quota).
    Save `{ "<key>": [offers...] }` to `run/buy/offers.json`. Note any query with no match.
+   If `get_product_offers` returns no offers but the picked search result had a price, also save
+   `"_search_prices": { "<key>": { "price": "<search price>", "url": "<product idealo url>" } }`; calc then uses it as an indicative offer.
 3. Run `node buy/agent.js finish` and read `run/buy/result.json`.
 4. Decide using the rules in `buy/decision_prompt.md`. Add `yarn_spec` (brand, name, metres_per_skein, skein_grams) to each decision. Save to `run/buy/decision.json`.
 5. Show the knitter:
    - what the stash already covers (and any dye-lot warning),
-   - the basket: shop, product, skeins, price per skein, total incl. shipping, price per 100 m, link,
+   - the basket: shop, product, skeins, price per skein, total incl. shipping, price per 100 m, link;
+     mark indicative offers (shop "idealo (from price)", no shipping) with the flag "Indicative price: offers not returned by the idealo trial API, check the link",
    - all offers and all substitutes listed from the lowest price to the most expensive (`offer.all` is already sorted),
    - budget status: max 10 € per skein and max 150 € per project (yarn + missing needles), plus the long-term range if one exists,
    - any substitute with its trade-off in plain words,
