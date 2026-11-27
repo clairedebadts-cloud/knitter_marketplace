@@ -1,0 +1,14 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Personal data (real stash, budget history)
+stash.local.json
+*.local.json
+
+# System and tooling
+.DS_Store
+node_modules/
+__pycache__/
+*.log
