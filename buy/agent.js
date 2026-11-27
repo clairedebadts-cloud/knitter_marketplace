@@ -15,7 +15,7 @@ const path = require('path');
 require('../lib/env').loadEnv();
 const ravelry = require('../lib/ravelry');
 const stash = require('../lib/stash');
-const { run: calc, longTermBudget } = require('../lib/calc');
+const { run: calc, longTermBudget, needleKey } = require('../lib/calc');
 const subs = require('../lib/subs');
 
 const RUN = path.join(__dirname, '..', 'run', 'buy');
@@ -35,14 +35,19 @@ async function prepare(url, size) {
     ravelry_stash_raw: realStash, stash: s.stash, needles_owned: s.needles_owned, budget: s.budget,
     long_term_budget: longTermBudget(s.budget.history),
     substitute_candidates: candidates,
-    idealo_queries: [main, ...candidates].map((y) => ({ key: yarnKey(y), query: yarnKey(y), country: process.env.IDEALO_COUNTRY || 'DE' })),
+    idealo_queries: [
+      ...[main, ...candidates].map((y) => ({ kind: 'yarn', key: yarnKey(y), query: yarnKey(y) })),
+      ...[...new Set((pattern.needles || []).map((n) => n.mm))].map((mm) => ({ kind: 'needle', key: needleKey(mm), query: needleKey(mm) })),
+    ].map((q) => ({ ...q, country: process.env.IDEALO_COUNTRY || 'DE' })),
   };
   console.log(`Plan: ${write('plan.json', plan)}`);
   console.log(`Pattern yarn: ${yarnKey(main)} (${main.weight_class}, ${main.total_metres} m)`);
   console.log(`Substitute candidates: ${candidates.map((c) => `${yarnKey(c)} [${c.match_score}]`).join(', ') || 'none'}`);
   console.log('Next: run idealo search_products + get_product_offers for each idealo_queries[].query,');
-  console.log('save { "<key>": [offers...] } to run/offers.json, then: node buy/agent.js finish');
+  console.log('save { "<key>": [offers...] } to run/buy/offers.json (yarn and KnitPro Zing needle keys), then: node buy/agent.js finish');
 }
+
+const price = (s) => (s.line.offer && s.line.offer.best_in_stock ? s.line.offer.best_in_stock.total_eur : Infinity);
 
 function finish() {
   const plan = read('plan.json');
@@ -55,11 +60,17 @@ function finish() {
     const p = { ...plan.pattern, yarns: [{ ...c, role: 'main', colour: null, total_metres: plan.pattern.yarns[0].total_metres }] };
     const r = calc({ ...base, pattern: p });
     return { candidate: c, line: r.lines[0], basket_total_eur: r.basket_total_eur };
-  });
+  }).sort((a, b) => price(a) - price(b)); // lowest price first, unpriced last
 
   const result = { ...original, substitutes, long_term_budget: plan.long_term_budget };
   console.log(`Result: ${write('result.json', result)}`);
   for (const l of original.lines) console.log(`${l.yarn}: need ${l.needed_metres} m, stash ${l.stash.usable_one_lot_metres} m, buy ${l.skeins_to_buy} skeins. ${l.flags.join(' ')}`);
+  for (const n of original.needles) {
+    const b = n.zing.best_in_stock;
+    console.log(`Needle ${n.mm} mm: ${n.owned ? 'owned' : 'missing'}, KnitPro Zing ${b ? `from ${b.total_eur} € incl. shipping` : 'no offer'}`);
+  }
+  const st = original.budget.short_term;
+  console.log(`Basket ${original.basket_total_eur} € (yarn ${original.yarn_total_eur} + needles ${original.needle_total_eur}) vs max ${st.max_total_eur ?? '-'} €; max ${st.max_per_skein_eur ?? '-'} €/skein`);
   console.log('Next: decide with buy/decision_prompt.md using run/result.json, save run/decision.json');
 }
 

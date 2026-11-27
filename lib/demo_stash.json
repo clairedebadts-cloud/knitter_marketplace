@@ -10,7 +10,7 @@
     { "type": "circular", "mm": 3.5, "length_cm": 40 }
   ],
   "budget": {
-    "short_term": { "project": "current", "max_total_eur": 60, "max_per_100m_eur": 4.0 },
+    "short_term": { "project": "current", "max_total_eur": 150, "max_per_skein_eur": 10 },
     "history": [
       { "project": "Raglan sweater", "per_100m_eur": 3.1, "total_eur": 52 },
       { "project": "Cardigan", "per_100m_eur": 3.4, "total_eur": 61 },
