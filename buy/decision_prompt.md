@@ -21,6 +21,14 @@ Substitute rules, in order of importance:
 4. Within budget (price per skein and project total); among valid options, the cheapest first.
 Recompute skeins for a substitute from ITS metres per skein, never the original's.
 
+Budget substitutes (`budget_substitutes`, marked "budget substitute") come from Ravelry's popular yarns of the same
+weight class when the pattern yarn and all suggested substitutes are over budget or not buyable. They may change fibre:
+always state that trade-off. Prefer `recommended_budget_substitute` (the cheapest within budget).
+
+Held-together combinations (`held_together`, marked "held together"): one yarn held double or two yarns held together,
+effective metres per 50 g within 10% of the pattern yarn. Each strand needs the full pattern metres. A combination fully
+covered by the stash (`stash_covered`) is a strong option; always state its trade-off and say to swatch first.
+
 Return ONLY JSON:
 ```json
 {

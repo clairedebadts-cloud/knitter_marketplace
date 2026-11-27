@@ -5,6 +5,8 @@
 //   node buy/agent.js prepare <ravelry-url> <size>   pattern + stash + budget -> run/plan.json (+ idealo queries)
 //   (Claude Code: run idealo searches, save offers to run/offers.json)
 //   node buy/agent.js finish                         calc + substitutes -> run/result.json
+//   node buy/agent.js budget-subs                    if everything is over budget: popular Ravelry yarns -> plan (+ idealo queries), then finish again
+//   node buy/agent.js held-together                  held-double / two-yarn combinations (stash first) -> plan (+ idealo queries for missing strands), then finish again
 //   (Claude Code: decide with buy/decision_prompt.md, save run/decision.json)
 //   node buy/agent.js confirm                        update stash + budget history after "yes, buy it"
 //   node buy/agent.js stash                          list stash
@@ -49,6 +51,20 @@ async function prepare(url, size) {
 
 const price = (s) => (s.line.offer && s.line.offer.best_in_stock ? s.line.offer.best_in_stock.total_eur : Infinity);
 
+// Buyable and within budget: in-stock (or indicative) offer, no per-skein flag, total under the project cap.
+function withinBudget(line, basketTotal, budget) {
+  const st = (budget && budget.short_term) || {};
+  return !!(line && line.skeins_to_buy > 0 ? line.offer && line.offer.best_in_stock : true) &&
+    !(line.flags || []).some((f) => /Over budget/.test(f)) &&
+    (st.max_total_eur == null || basketTotal <= st.max_total_eur);
+}
+function needsBudgetFallback(result, budget) {
+  const main = result.lines[0];
+  if (!main || main.skeins_to_buy === 0) return false;
+  if (withinBudget(main, result.basket_total_eur, budget)) return false;
+  return !result.substitutes.some((s) => withinBudget(s.line, s.basket_total_eur, budget));
+}
+
 function finish() {
   const plan = read('plan.json');
   const offers = fs.existsSync(path.join(RUN, 'offers.json')) ? read('offers.json') : {};
@@ -56,13 +72,33 @@ function finish() {
   const original = calc({ ...base, pattern: plan.pattern });
 
   // Price every substitute as if it were the pattern yarn (its own metres per skein).
-  const substitutes = plan.substitute_candidates.map((c) => {
+  const priceCandidate = (c) => {
     const p = { ...plan.pattern, yarns: [{ ...c, role: 'main', colour: null, total_metres: plan.pattern.yarns[0].total_metres }] };
     const r = calc({ ...base, pattern: p });
     return { candidate: c, line: r.lines[0], basket_total_eur: r.basket_total_eur };
-  }).sort((a, b) => price(a) - price(b)); // lowest price first, unpriced last
+  };
+  const substitutes = plan.substitute_candidates.map(priceCandidate)
+    .sort((a, b) => price(a) - price(b)); // lowest price first, unpriced last
 
-  const result = { ...original, substitutes, long_term_budget: plan.long_term_budget };
+  // Budget substitutes (from budget-subs), cheapest first; recommend the cheapest within budget.
+  const budgetSubs = (plan.budget_substitute_candidates || []).map((c) => ({ ...priceCandidate(c), budget_substitute: true }))
+    .sort((a, b) => price(a) - price(b));
+  const recommended = budgetSubs.find((s) => withinBudget(s.line, s.basket_total_eur, plan.budget)) || null;
+
+  // Held-together combinations: each strand needs the full pattern metres; stash first, idealo for the rest.
+  const held = (plan.held_together_candidates || []).map((c) => {
+    const r = calc({ ...base, pattern: heldPattern(plan.pattern, c) });
+    const stashCovered = r.lines.every((l) => l.skeins_to_buy === 0);
+    const buyable = r.lines.every((l) => l.skeins_to_buy === 0 || (l.offer && l.offer.best_in_stock));
+    return { ...c, held_together: true, lines: r.lines, stash_covered: stashCovered,
+      basket_total_eur: buyable ? r.yarn_total_eur : null,
+      within_budget: buyable && r.lines.every((l) => withinBudget(l, r.basket_total_eur, plan.budget)) };
+  }).sort((a, b) => (b.stash_covered - a.stash_covered) || ((a.basket_total_eur ?? Infinity) - (b.basket_total_eur ?? Infinity)));
+
+  const result = { ...original, substitutes, long_term_budget: plan.long_term_budget, held_together: held,
+    budget_fallback_needed: needsBudgetFallback({ ...original, substitutes }, plan.budget),
+    budget_substitutes: budgetSubs,
+    recommended_budget_substitute: recommended ? recommended.line.yarn : null };
   console.log(`Result: ${write('result.json', result)}`);
   for (const l of original.lines) console.log(`${l.yarn}: need ${l.needed_metres} m, stash ${l.stash.usable_one_lot_metres} m, buy ${l.skeins_to_buy} skeins. ${l.flags.join(' ')}`);
   for (const n of original.needles) {
@@ -71,7 +107,86 @@ function finish() {
   }
   const st = original.budget.short_term;
   console.log(`Basket ${original.basket_total_eur} € (yarn ${original.yarn_total_eur} + needles ${original.needle_total_eur}) vs max ${st.max_total_eur ?? '-'} €; max ${st.max_per_skein_eur ?? '-'} €/skein`);
-  console.log('Next: decide with buy/decision_prompt.md using run/result.json, save run/decision.json');
+  for (const b of budgetSubs) {
+    const o = b.line.offer && b.line.offer.best_in_stock;
+    console.log(`Budget substitute: ${b.line.yarn}: ${o ? `${b.line.skeins_to_buy} skeins, ${o.total_eur} €${o.indicative ? ' (indicative)' : ''}` : 'no offer'}. ${b.line.flags.join(' ')}`);
+  }
+  for (const h of held) {
+    const status = h.stash_covered ? 'covered by stash' : h.basket_total_eur != null ? `${h.basket_total_eur} € to buy` : 'not buyable';
+    console.log(`Held together: ${h.label} (${h.effective_metres_per_50g} m/50 g): ${status}. ${h.lines.map((l) => `${l.yarn}: need ${l.needed_metres} m, stash ${l.stash.usable_one_lot_metres} m, buy ${l.skeins_to_buy}`).join('; ')}`);
+  }
+  if (budgetSubs.length) console.log(`Recommended budget substitute: ${result.recommended_budget_substitute || 'none within budget'}`);
+  if (result.budget_fallback_needed && !plan.budget_substitute_candidates) {
+    console.log('Pattern yarn and all Ravelry substitutes are over budget or not buyable. Next: node buy/agent.js budget-subs');
+  } else {
+    console.log('Next: decide with buy/decision_prompt.md using run/result.json, save run/decision.json');
+  }
+}
+
+// Budget fallback: popular Ravelry yarns of the same weight class, metres per 50 g within 10%, not discontinued.
+async function budgetSubsStep() {
+  const plan = read('plan.json');
+  const result = read('result.json');
+  if (!result.budget_fallback_needed) { console.log('Budget fallback not needed: pattern yarn or a substitute is within budget.'); return; }
+  const main = plan.pattern.yarns[0];
+  const skip = new Set([main.ravelry_yarn_id, ...plan.pattern.ravelry_alternatives.map((y) => y.ravelry_yarn_id)]);
+  const found = await ravelry.searchYarns(main.weight_class, 20);
+  const kept = found.filter((y) => !skip.has(y.id) && !y.discontinued && y.metres_per_50g && main.metres_per_50g &&
+    Math.abs(y.metres_per_50g - main.metres_per_50g) / main.metres_per_50g <= 0.1);
+  const detailed = await ravelry.fetchYarns(kept.map((y) => y.id));
+  const ranked = subs.rankBudget(main, detailed, 5);
+  plan.budget_substitute_candidates = ranked;
+  plan.idealo_queries = [
+    ...plan.idealo_queries.filter((q) => q.kind !== 'budget_substitute'),
+    ...ranked.map((y) => ({ kind: 'budget_substitute', key: yarnKey(y), query: yarnKey(y), country: process.env.IDEALO_COUNTRY || 'DE' })),
+  ];
+  write('plan.json', plan);
+  console.log(`Ravelry ${main.weight_class} yarns by popularity: ${found.length}; within 10% of ${main.metres_per_50g} m/50 g and not discontinued: ${kept.length}`);
+  for (const y of ranked) console.log(`Budget substitute candidate: ${yarnKey(y)} [${y.match_score}] ${y.metres_per_50g} m/50 g, ${y.fibre}. ${y.trade_offs.join('; ')}`);
+  console.log(ranked.length
+    ? 'Next: search the kind "budget_substitute" idealo_queries (one get_product_offers each), add them to run/buy/offers.json, then: node buy/agent.js finish'
+    : 'No budget substitutes found. Next: decide with buy/decision_prompt.md using run/result.json');
+}
+
+// One pattern line per distinct strand; a yarn held double needs twice the pattern metres.
+function heldPattern(pattern, combo) {
+  const need = pattern.yarns[0].total_metres;
+  const byKey = new Map();
+  for (const st of combo.strands) {
+    const k = yarnKey(st);
+    if (byKey.has(k)) byKey.get(k).total_metres += need;
+    else byKey.set(k, { brand: st.brand, name: st.name, colour: null, fibre: st.fibre || null, weight_class: st.weight_class || null,
+      metres_per_skein: st.metres_per_skein, skein_grams: st.skein_grams, role: 'held_together', total_metres: need });
+  }
+  return { ...pattern, yarns: [...byKey.values()] };
+}
+
+function heldTogetherStep() {
+  const plan = read('plan.json');
+  const main = plan.pattern.yarns[0];
+  const fromStash = plan.stash.map((s) => ({ brand: s.brand, name: s.name, fibre: s.fibre || null, from_stash: true,
+    metres_per_skein: s.metres_per_skein, skein_grams: s.skein_grams,
+    metres_per_50g: s.metres_per_skein && s.skein_grams ? Math.round((s.metres_per_skein / s.skein_grams) * 50) : null }));
+  const pool = [...fromStash, ...plan.pattern.ravelry_alternatives, ...(plan.budget_substitute_candidates || [])];
+  const combos = subs.heldTogether(main, pool, 10);
+  plan.held_together_candidates = combos;
+  // idealo only for strands the stash does not cover and that are not searched yet.
+  const searched = new Set(plan.idealo_queries.filter((q) => q.kind !== 'held_together').map((q) => q.key));
+  const missing = new Set();
+  for (const c of combos) {
+    const r = calc({ stash: plan.stash, needles_owned: plan.needles_owned, budget: plan.budget, offers: {}, pattern: heldPattern(plan.pattern, c) });
+    for (const l of r.lines) if (l.skeins_to_buy > 0 && !searched.has(l.yarn)) missing.add(l.yarn);
+  }
+  plan.idealo_queries = [
+    ...plan.idealo_queries.filter((q) => q.kind !== 'held_together'),
+    ...[...missing].map((k) => ({ kind: 'held_together', key: k, query: k, country: process.env.IDEALO_COUNTRY || 'DE' })),
+  ];
+  write('plan.json', plan);
+  console.log(`Held-together combinations within 10% of ${main.metres_per_50g} m/50 g: ${combos.length}`);
+  for (const c of combos) console.log(`Held together: ${c.label}: ${c.effective_metres_per_50g} m/50 g (${c.metres_diff_pct}% off), ${c.stash_strands} strand(s) from stash. ${c.trade_offs.join('; ')}`);
+  console.log(missing.size
+    ? `Next: search the kind "held_together" idealo_queries (${[...missing].join(', ')}), add them to run/buy/offers.json, then: node buy/agent.js finish`
+    : 'No idealo searches needed for held-together strands. Next: node buy/agent.js finish');
 }
 
 function confirm() {
@@ -94,9 +209,11 @@ function confirm() {
     if (cmd === 'inspect') { const { pattern } = await ravelry.fetchPattern(a); console.log(JSON.stringify(pattern, null, 2)); }
     else if (cmd === 'prepare') await prepare(a, b);
     else if (cmd === 'finish') finish();
+    else if (cmd === 'budget-subs') await budgetSubsStep();
+    else if (cmd === 'held-together') heldTogetherStep();
     else if (cmd === 'confirm') confirm();
     else if (cmd === 'stash') console.log(JSON.stringify(stash.load().stash, null, 2));
     else if (cmd === 'stash-add') console.log(`Saved to ${stash.add(JSON.parse(a))}`);
-    else console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(2, 13).join('\n'));
+    else console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(2, 15).join('\n'));
   } catch (e) { console.error(`Error: ${e.message}`); process.exit(1); }
 })();

@@ -15,6 +15,12 @@ You are the Knitter Marketplace agent. Run these steps in order and keep the kni
    If `get_product_offers` returns no offers but the picked search result had a price, also save
    `"_search_prices": { "<key>": { "price": "<search price>", "url": "<product idealo url>" } }`; calc then uses it as an indicative offer.
 3. Run `node buy/agent.js finish` and read `run/buy/result.json`.
+   If `budget_fallback_needed` is true (pattern yarn and all Ravelry substitutes over budget or not buyable):
+   run `node buy/agent.js budget-subs`, then for each `kind: "budget_substitute"` query in `run/buy/plan.json`
+   do the same idealo search as in step 2 (one `get_product_offers` each, `_search_prices` if no offers),
+   add them to `run/buy/offers.json`, and run `node buy/agent.js finish` again.
+   Then run `node buy/agent.js held-together`. If it lists `kind: "held_together"` queries (strands the stash
+   does not cover), search them the same way, add them to `run/buy/offers.json`, and run `node buy/agent.js finish` again.
 4. Decide using the rules in `buy/decision_prompt.md`. Add `yarn_spec` (brand, name, metres_per_skein, skein_grams) to each decision. Save to `run/buy/decision.json`.
 5. Show the knitter:
    - what the stash already covers (and any dye-lot warning),
@@ -23,6 +29,8 @@ You are the Knitter Marketplace agent. Run these steps in order and keep the kni
    - all offers and all substitutes listed from the lowest price to the most expensive (`offer.all` is already sorted),
    - budget status: max 10 € per skein and max 150 € per project (yarn + missing needles), plus the long-term range if one exists,
    - any substitute with its trade-off in plain words,
+   - held-together combinations (`held_together`: stash-covered first, then cheapest), each labelled "held together", with effective metres per 50 g, what the stash covers per strand, what to buy, and the trade-off,
+   - budget substitutes (`budget_substitutes`, cheapest first), each labelled "budget substitute" with its trade-offs, and the recommended one (`recommended_budget_substitute`: the cheapest within budget),
    - needles: KnitPro Zing price for each size (lowest first), marked owned or missing; only missing ones count toward the total.
 6. Ask: "Shall I mark this as bought and update your stash?" Only if they say yes, run `node buy/agent.js confirm`.
 
